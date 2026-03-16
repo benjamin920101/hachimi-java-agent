@@ -1,10 +1,12 @@
 package com.hachimi.dump;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
+import java.nio.channels.FileChannel;
 import java.security.ProtectionDomain;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -29,7 +31,10 @@ public class ClassDumpAgent {
     
     // 轉儲目錄
     private static final String DUMP_DIR = "dumped_classes";
-    
+
+    // DLL 複製目錄
+    private static final String DLL_COPY_DIR = "copied_dlls";
+
     // 統計計數器
     private static final AtomicInteger totalClasses = new AtomicInteger(0);
     private static final AtomicInteger targetClasses = new AtomicInteger(0);
@@ -495,7 +500,7 @@ public class ClassDumpAgent {
                         dllLoaded = true;
                         dllLoadTime = System.currentTimeMillis();
                         dllPath = file.getAbsolutePath();
-                        
+
                         System.out.println();
                         System.out.println("╔═══════════════════════════════════════════════════════════╗");
                         System.out.println("║   [AUTO-DETECT] ★★★ 暫存 DLL 偵測！★★★                  ║");
@@ -504,10 +509,14 @@ public class ClassDumpAgent {
                         System.out.println("   運行時間：" + String.format("%.2f", getRunningTime()) + " 秒");
                         System.out.println("   DLL 路徑：" + dllPath);
                         System.out.println("   文件大小：" + file.length() + " bytes");
+                        
+                        // 自動複製 DLL
+                        copyDllFile();
+                        
                         System.out.println("   建議：立即複製此 DLL 文件進行分析！");
                         System.out.println("   命令：cp \"" + dllPath + "\" ./analysis/");
                         printSeparator();
-                        
+
                         detectedBehaviors.add("Temp scan DLL found: " + dllPath);
                     }
                 }
@@ -605,16 +614,16 @@ public class ClassDumpAgent {
             System.getProperty("user.home") + "/AppData/Local/Temp",
             System.getProperty("user.home") + "/AppData/Roaming/.minecraft"
         };
-        
+
         for (String searchPath : searchPaths) {
             if (searchPath == null) continue;
-            
+
             File found = searchDllInDirectory(searchPath);
             if (found != null) {
                 dllLoaded = true;
                 dllLoadTime = System.currentTimeMillis();
                 dllPath = found.getAbsolutePath();
-                
+
                 System.out.println();
                 System.out.println("╔═══════════════════════════════════════════════════════════╗");
                 System.out.println("║   [AUTO-DETECT] ★★★ 全局搜索找到 DLL！★★★              ║");
@@ -622,9 +631,13 @@ public class ClassDumpAgent {
                 System.out.println("   時間：" + timestamp());
                 System.out.println("   運行時間：" + String.format("%.2f", getRunningTime()) + " 秒");
                 System.out.println("   DLL 路徑：" + dllPath);
+                
+                // 自動複製 DLL
+                copyDllFile();
+                
                 System.out.println("   建議：立即複製此 DLL 文件進行分析！");
                 printSeparator();
-                
+
                 detectedBehaviors.add("Global search DLL found: " + dllPath);
                 return;
             }
@@ -643,9 +656,108 @@ public class ClassDumpAgent {
         System.out.println("   運行時間：" + String.format("%.2f", getRunningTime()) + " 秒");
         System.out.println("   位置：" + location);
         System.out.println("   DLL 路徑：" + dllPath);
+        
+        // 自動複製 DLL
+        copyDllFile();
+        
         System.out.println("   建議：立即複製此 DLL 文件進行分析！");
         System.out.println("   命令：cp \"" + dllPath + "\" ./analysis/");
         printSeparator();
+    }
+
+    /**
+     * 複製 DLL 文件到保存目錄
+     */
+    private static void copyDllFile() {
+        if (dllPath == null || dllPath.isEmpty()) {
+            System.err.println("[DLL COPY] 錯誤：DLL 路徑為空");
+            return;
+        }
+
+        File dllFile = new File(dllPath);
+        if (!dllFile.exists()) {
+            System.err.println("[DLL COPY] 錯誤：DLL 文件不存在：" + dllPath);
+            return;
+        }
+
+        // 創建複製目錄
+        File copyDir = new File(DLL_COPY_DIR);
+        if (!copyDir.exists()) {
+            boolean created = copyDir.mkdirs();
+            System.out.println("[DLL COPY] 創建複製目錄：" + copyDir.getAbsolutePath() + 
+                " → " + (created ? "成功" : "失敗"));
+        }
+
+        // 生成目標文件名（包含時間戳避免覆蓋）
+        String dllFileName = dllFile.getName();
+        String timestampSuffix = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date(dllLoadTime));
+        String baseName = dllFileName;
+        int lastDot = dllFileName.lastIndexOf('.');
+        if (lastDot > 0) {
+            baseName = dllFileName.substring(0, lastDot);
+            String extension = dllFileName.substring(lastDot);
+            dllFileName = baseName + "_" + timestampSuffix + extension;
+        } else {
+            dllFileName = baseName + "_" + timestampSuffix;
+        }
+
+        File destFile = new File(copyDir, dllFileName);
+
+        // 如果目標文件已存在，添加序號
+        if (destFile.exists()) {
+            int counter = 1;
+            do {
+                String newName;
+                if (lastDot > 0) {
+                    newName = baseName + "_" + timestampSuffix + "_" + counter + 
+                              dllFileName.substring(lastDot);
+                } else {
+                    newName = baseName + "_" + timestampSuffix + "_" + counter;
+                }
+                destFile = new File(copyDir, newName);
+                counter++;
+            } while (destFile.exists());
+        }
+
+        // 複製文件
+        try {
+            copyFile(dllFile, destFile);
+            System.out.println();
+            System.out.println("╔═══════════════════════════════════════════════════════════╗");
+            System.out.println("║   [DLL COPY] ★★★ DLL 複製成功！★★★                    ║");
+            System.out.println("╚═══════════════════════════════════════════════════════════╝");
+            System.out.println("   來源：" + dllFile.getAbsolutePath());
+            System.out.println("   目標：" + destFile.getAbsolutePath());
+            System.out.println("   文件大小：" + destFile.length() + " bytes");
+            printSeparator();
+        } catch (IOException e) {
+            System.err.println("[DLL COPY] 錯誤：複製 DLL 失敗");
+            System.err.println("   來源：" + dllFile.getAbsolutePath());
+            System.err.println("   錯誤信息：" + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 複製文件（使用 FileChannel 高效複製）
+     */
+    private static void copyFile(File source, File dest) throws IOException {
+        try (FileInputStream fis = new FileInputStream(source);
+             FileOutputStream fos = new FileOutputStream(dest);
+             FileChannel sourceChannel = fis.getChannel();
+             FileChannel destChannel = fos.getChannel()) {
+            
+            long size = sourceChannel.size();
+            long copied = 0;
+            
+            while (copied < size) {
+                long bytes = sourceChannel.transferTo(copied, size - copied, destChannel);
+                if (bytes <= 0) {
+                    break;
+                }
+                copied += bytes;
+            }
+        }
     }
     
     /**
