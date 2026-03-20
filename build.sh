@@ -27,11 +27,8 @@ javac -version
 # Compile
 echo
 echo "[INFO] Compiling..."
-javac -d "$BUILD_DIR" \
-    "$SRC_DIR/ClassDumpAgent.java" \
-    "$SRC_DIR/ClassViewer.java" \
-    "$SRC_DIR/ObfuscatedFileDetector.java" \
-    "$SRC_DIR/AgentAttacher.java"
+# Compile all Java files in src to avoid missing-file errors
+javac -d "$BUILD_DIR" "$SRC_DIR"/*.java
 
 if [ $? -ne 0 ]; then
     echo "[ERROR] Compilation failed"
@@ -69,7 +66,7 @@ echo "╚═══════════════════════�
 echo
 echo "Usage:"
 echo "  Method 1: Attach at startup"
-echo "    java -javaagent:ClassDumpAgent.jar -jar minecraft.jar"
+echo "    java -javaagent:/path/to/ClassDumpAgent.jar -jar minecraft.jar"
 echo
 echo "  Method 2: Use full path"
 echo "    java -javaagent:$JAR_FILE -jar minecraft.jar"
