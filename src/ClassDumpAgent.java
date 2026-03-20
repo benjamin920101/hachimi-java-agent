@@ -238,20 +238,34 @@ public class ClassDumpAgent {
         detectThread.start();
     }
 
+    // Replace the existing startGUI() method with this delayed-start version
     private static void startGUI() {
-        System.out.println("[GUI] " + timestamp() + " Starting Class Viewer GUI...");
-        System.out.println("[GUI] " + timestamp() + " GUI runs in parallel with agent - Close window to exit GUI only");
-        
-        SwingUtilities.invokeLater(() -> {
-            try {
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception e) {
-                // Ignore
-            }
-            
-            ClassViewerGUI gui = new ClassViewerGUI();
-            gui.setVisible(true);
+        System.out.println("[GUI] " + timestamp() + " Scheduling Class Viewer GUI startup (delayed)...");
+        ScheduledExecutorService ses = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "GUI-Starter");
+            t.setDaemon(true);
+            return t;
         });
+
+        // Delay GUI startup to avoid early-classloader/init race conditions.
+        ses.schedule(() -> {
+            SwingUtilities.invokeLater(() -> {
+                try {
+                    UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+                } catch (Exception e) {
+                    // ignore LAF errors
+                }
+
+                try {
+                    ClassViewerGUI gui = new ClassViewerGUI();
+                    gui.setVisible(true);
+                    System.out.println("[GUI] " + timestamp() + " Class Viewer GUI visible.");
+                } catch (Throwable t) {
+                    System.err.println("[GUI] " + timestamp() + " Failed to start GUI: " + t);
+                    t.printStackTrace();
+                }
+            });
+        }, 5, TimeUnit.SECONDS);
     }
 
     private static void startFeatureThreads() {
