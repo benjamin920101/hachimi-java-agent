@@ -12,45 +12,58 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * PhantomShieldX64 類加載攔截 Agent（增強版）
- * 
+ *
  * 功能：
  * 1. 攔截所有被 ClassLoader 加載的類
  * 2. 自動保存到 dumped_classes/ 目錄
  * 3. 重點監控 skidonion.sAnhI 包（PhantomShield 類加載器）
  * 4. 自動偵測 DLL 加載和解密過程
  * 5. 監控異常行為和反調試機制
- * 
+ * 6. 任務管理器窗口 - 查看正在運行和已加載的 class
+ * 7. 混淆文件檢測窗口 - 顯示被混淆的 DLL 和 SO 文件
+ *
  * 使用方法：
  * java -javaagent:ClassDumpAgent.jar -jar minecraft.jar
+ * 
+ * 高級功能：
+ * java -javaagent:ClassDumpAgent.jar=taskmgr -jar minecraft.jar  # 啟用任務管理器
+ * java -javaagent:ClassDumpAgent.jar=obfuscated -jar minecraft.jar  # 啟用混淆文件檢測
+ * java -javaagent:ClassDumpAgent.jar=all -jar minecraft.jar  # 啟用所有功能
  */
 public class ClassDumpAgent {
-    
+
     // 轉儲目錄
     private static final String DUMP_DIR = "dumped_classes";
 
     // DLL 複製目錄
     private static final String DLL_COPY_DIR = "copied_dlls";
 
+    // 混淆文件複製目錄
+    private static final String OBFUSCATED_FILE_DIR = "obfuscated_files";
+
     // 統計計數器
     private static final AtomicInteger totalClasses = new AtomicInteger(0);
     private static final AtomicInteger targetClasses = new AtomicInteger(0);
     private static final AtomicInteger skippedClasses = new AtomicInteger(0);
     private static final AtomicInteger errorCount = new AtomicInteger(0);
-    
+
     // 目標包前綴（PhantomShield 相關）
     private static final String[] TARGET_PACKAGES = {
         "skidonion.",
         "net.hachimi.",
         "tech.skidonion."
     };
-    
+
     // Agent 啟動時間
     private static final long startTime = System.currentTimeMillis();
-    
+
     // 自動偵測狀態
     private static boolean dllLoaded = false;
     private static long dllLoadTime = 0;
@@ -58,16 +71,21 @@ public class ClassDumpAgent {
     private static final List<String> detectedBehaviors = new ArrayList<>();
     private static int classLoadBurstCount = 0;  // 類加載爆發計數
     private static long lastClassLoadTime = 0;
-    
+
     // 關鍵類檢測標記
     private static boolean phantomShieldLoaded = false;
     private static boolean diyContainerLoaded = false;
     private static boolean nativeMethodFound = false;
-    
+
     // System.loadLibrary() 監控
     private static boolean loadLibraryCalled = false;
     private static String lastLibraryName = null;
     private static long lastLibraryLoadTime = 0;
+
+    // 新功能開關
+    private static boolean enableTaskMgr = false;
+    private static boolean enableObfuscatedFileDetect = false;
+    private static ScheduledExecutorService scheduledExecutor;
     
     /**
      * 獲取當前時間戳
@@ -112,9 +130,17 @@ public class ClassDumpAgent {
         printSeparator();
         
         // 解析 agent 參數
-        System.out.println("[INFO] " + timestamp() + " Agent 參數：" + 
+        System.out.println("[INFO] " + timestamp() + " Agent 參數：" +
             (agentArgs != null && !agentArgs.isEmpty() ? agentArgs : "(無)"));
         
+        // 解析功能開關
+        parseAgentArgs(agentArgs);
+        
+        System.out.println("[INFO] " + timestamp() + " 功能開關:");
+        System.out.println("   任務管理器：" + (enableTaskMgr ? "已啟用" : "未啟用"));
+        System.out.println("   混淆文件檢測：" + (enableObfuscatedFileDetect ? "已啟用" : "未啟用"));
+        printSeparator();
+
         // 創建轉儲目錄
         File dumpDir = new File(DUMP_DIR);
         if (!dumpDir.exists()) {
@@ -154,6 +180,11 @@ public class ClassDumpAgent {
         // 啟動自動偵測線程
         startAutoDetectThread();
         
+        // 啟動新功能線程
+        if (enableTaskMgr || enableObfuscatedFileDetect) {
+            startFeatureThreads();
+        }
+
         // 註冊關閉鉤子，打印最終統計
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             printFinalReport();
@@ -253,7 +284,141 @@ public class ClassDumpAgent {
         detectThread.setDaemon(true);
         detectThread.start();
     }
-    
+
+    /**
+     * 啟動新功能線程（任務管理器和混淆文件檢測）
+     */
+    private static void startFeatureThreads() {
+        scheduledExecutor = Executors.newScheduledThreadPool(2, r -> {
+            Thread t = new Thread(r, "Feature-Thread");
+            t.setDaemon(true);
+            return t;
+        });
+
+        // 任務管理器線程 - 定期輸出類加載統計
+        if (enableTaskMgr) {
+            scheduledExecutor.scheduleAtFixedRate(() -> {
+                try {
+                    printTaskMgrStatus();
+                } catch (Exception e) {
+                    // 忽略異常
+                }
+            }, 30, 30, TimeUnit.SECONDS);  // 每 30 秒輸出一次
+
+            System.out.println("[TASKMGR] " + timestamp() + " 任務管理器已啟動 - 每 30 秒輸出狀態");
+        }
+
+        // 混淆文件檢測線程
+        if (enableObfuscatedFileDetect) {
+            scheduledExecutor.schedule(() -> {
+                try {
+                    System.out.println();
+                    System.out.println("╔═══════════════════════════════════════════════════════════╗");
+                    System.out.println("║   混淆文件檢測器 - 開始掃描                               ║");
+                    System.out.println("╚═══════════════════════════════════════════════════════════╝");
+                    System.out.println();
+                    
+                    // 創建混淆文件目錄
+                    File obfuscatedDir = new File(OBFUSCATED_FILE_DIR);
+                    if (!obfuscatedDir.exists()) {
+                        obfuscatedDir.mkdirs();
+                    }
+                    
+                    ObfuscatedFileDetector.scanAll();
+                    
+                    // 複製檢測到的文件
+                    ObfuscatedFileDetector.copyDetectedFiles(OBFUSCATED_FILE_DIR);
+                    
+                } catch (Exception e) {
+                    // 忽略異常
+                }
+            }, 10, TimeUnit.SECONDS);  // 10 秒後開始掃描
+
+            System.out.println("[OBFUSCATED] " + timestamp() + " 混淆文件檢測已啟動 - 10 秒後開始掃描");
+        }
+    }
+
+    /**
+     * 打印任務管理器狀態
+     */
+    private static void printTaskMgrStatus() {
+        System.out.println();
+        System.out.println("╔═══════════════════════════════════════════════════════════╗");
+        System.out.println("║   任務管理器 - 類加載狀態                                   ║");
+        System.out.println("╚═══════════════════════════════════════════════════════════╝");
+        System.out.println();
+
+        // 類加載摘要
+        ClassViewer.printSummary();
+
+        // 類加載器信息
+        ClassViewer.printClassLoaderInfo();
+
+        // 包統計
+        ClassViewer.printPackageStats();
+
+        // 可疑類檢測
+        if (ClassViewer.isObfuscationDetected()) {
+            ClassViewer.printSuspiciousClasses();
+        }
+
+        // 最大類
+        List<ClassViewer.ClassInfo> largestClasses = ClassViewer.getLargestClasses(10);
+        if (!largestClasses.isEmpty()) {
+            System.out.println();
+            System.out.println("■ 最大的 10 個類");
+            System.out.println();
+            System.out.printf("%-50s %10s %15s%n", "類名", "大小 (KB)", "加載時間");
+            System.out.println("─────────────────────────────────────────────────────────────────");
+            for (ClassViewer.ClassInfo info : largestClasses) {
+                String name = info.className;
+                if (name.length() > 48) {
+                    name = "..." + name.substring(name.length() - 45);
+                }
+                System.out.printf("%-50s %10.2f %15.2fs%n",
+                        name,
+                        info.size / 1024.0,
+                        info.loadTime / 1000.0);
+            }
+        }
+
+        // 最新加載的類
+        List<ClassViewer.ClassInfo> latestClasses = ClassViewer.getLatestLoadedClasses(5);
+        if (!latestClasses.isEmpty()) {
+            System.out.println();
+            System.out.println("■ 最新加載的 5 個類");
+            System.out.println();
+            for (ClassViewer.ClassInfo info : latestClasses) {
+                System.out.println("  [" + timestamp() + "] " + info.className +
+                    " (" + info.size + " bytes)");
+            }
+        }
+
+        printSeparator();
+    }
+
+    /**
+     * 解析 Agent 參數
+     */
+    private static void parseAgentArgs(String agentArgs) {
+        if (agentArgs == null || agentArgs.isEmpty()) {
+            return;
+        }
+
+        String[] args = agentArgs.split(",");
+        for (String arg : args) {
+            arg = arg.trim().toLowerCase();
+            if ("taskmgr".equals(arg) || "taskmanager".equals(arg) || "tm".equals(arg)) {
+                enableTaskMgr = true;
+            } else if ("obfuscated".equals(arg) || "obf".equals(arg) || "obfscan".equals(arg)) {
+                enableObfuscatedFileDetect = true;
+            } else if ("all".equals(arg) || "full".equals(arg)) {
+                enableTaskMgr = true;
+                enableObfuscatedFileDetect = true;
+            }
+        }
+    }
+
     /**
      * 靜默偵測 DLL 加載（無輸出）
      */
@@ -1026,6 +1191,14 @@ public class ClassDumpAgent {
                 checkKeyClass(dotClassName);
             }
             
+            // 記錄到 ClassViewer（任務管理器）
+            String classLoaderName = (loader == null) ? "Bootstrap" : loader.getClass().getName();
+            String sourceLocation = (protectionDomain != null && 
+                                     protectionDomain.getCodeSource() != null &&
+                                     protectionDomain.getCodeSource().getLocation() != null) ?
+                                    protectionDomain.getCodeSource().getLocation().toString() : "(unknown)";
+            ClassViewer.recordClassLoad(dotClassName, classLoaderName, classfileBuffer.length, sourceLocation);
+
             // 打印詳細日誌
             logTransform(currentTotal, dotClassName, loader, protectionDomain,
                          classfileBuffer, isTarget, matchedPackage, classBeingRedefined);

@@ -28,7 +28,11 @@ javac -version
 # 編譯
 echo
 echo "[INFO] 編譯中..."
-javac -d "$BUILD_DIR" "$SRC_DIR/ClassDumpAgent.java" "$SRC_DIR/AgentAttacher.java"
+javac -d "$BUILD_DIR" \
+    "$SRC_DIR/ClassDumpAgent.java" \
+    "$SRC_DIR/ClassViewer.java" \
+    "$SRC_DIR/ObfuscatedFileDetector.java" \
+    "$SRC_DIR/AgentAttacher.java"
 
 if [ $? -ne 0 ]; then
     echo "[ERROR] 編譯失敗"
