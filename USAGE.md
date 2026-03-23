@@ -2,7 +2,20 @@
 
 ## 新增功能
 
-### 1. 任務管理器窗口（TaskMgr）
+### 1. GUI 圖形界面（Class Viewer GUI）
+圖形化界面實時監控類加載，包括：
+- 類列表表格（類名、包、類加載器、大小、加載時間等）
+- 實時統計信息（總類數、類加載器數量、包數量等）
+- 過濾器（搜索、包過濾、僅顯示混淆類）
+- 事件日誌（記錄重要事件）
+- 雙擊查看類詳情
+- 導出類列表為 CSV
+- 查看最大/最新的類
+- 混淆檢測功能
+
+**默認啟用**：當不指定任何參數時，GUI 將自動啟動。
+
+### 2. 任務管理器窗口（TaskMgr）
 實時查看正在運行和已加載的 class，包括：
 - 類加載摘要（總數、活躍類、類加載器數量等）
 - 類加載器信息（每個類加載器加載的類數量和大小）
@@ -11,7 +24,7 @@
 - 最大的 10 個類
 - 最新加載的 5 個類
 
-### 2. 混淆文件檢測窗口（ObfuscatedFileDetector）
+### 3. 混淆文件檢測窗口（ObfuscatedFileDetector）
 檢測被混淆的 DLL 和 SO 文件，包括：
 - 副檔名被混淆的文件（如 `.dl_`, `.so_`, `.dy_` 等）
 - 文件名被混淆的動態庫（短文件名、哈希樣式等）
@@ -24,16 +37,19 @@
 ### 方法 1：啟動時附加（JVM 啟動時）
 
 ```bash
-# 只啟用基本類轉儲功能
+# 默認啟用 GUI（無參數）
 java -javaagent:ClassDumpAgent.jar -jar minecraft.jar
 
-# 啟用任務管理器
-java -javaagent:ClassDumpAgent.jar=taskmgr -jar minecraft.jar
+# 啟用 GUI 圖形界面
+java -javaagent:ClassDumpAgent.jar=gui -jar minecraft.jar
 
-# 啟用混淆文件檢測
-java -javaagent:ClassDumpAgent.jar=obfuscated -jar minecraft.jar
+# 只啟用任務管理器（禁用 GUI）
+java -javaagent:ClassDumpAgent.jar=nogui,taskmgr -jar minecraft.jar
 
-# 啟用所有功能
+# 只啟用混淆文件檢測（禁用 GUI）
+java -javaagent:ClassDumpAgent.jar=nogui,obfuscated -jar minecraft.jar
+
+# 啟用所有功能（GUI + 任務管理器 + 混淆文件檢測）
 java -javaagent:ClassDumpAgent.jar=all -jar minecraft.jar
 ```
 
@@ -67,9 +83,12 @@ chmod +x build.sh
 
 | 參數 | 別名 | 說明 |
 |------|------|------|
+| `gui` | `swing`, `g` | 啟用 GUI 圖形界面（默認啟用） |
+| `nogui` | `ng` | 禁用 GUI 圖形界面 |
 | `taskmgr` | `taskmanager`, `tm` | 啟用任務管理器，定期輸出類加載狀態 |
 | `obfuscated` | `obf`, `obfscan` | 啟用混淆文件檢測，掃描並複製可疑文件 |
-| `all` | `full` | 啟用所有功能（taskmgr + obfuscated） |
+| `all` | `full` | 啟用所有功能（GUI + taskmgr + obfuscated） |
+| `verbose` | `debug`, `v` | 啟用詳細日誌輸出 |
 
 多個參數可用逗號分隔：
 ```bash

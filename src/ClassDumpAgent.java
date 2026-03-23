@@ -363,6 +363,8 @@ public class ClassDumpAgent {
 
     private static void parseAgentArgs(String agentArgs) {
         if (agentArgs == null || agentArgs.isEmpty()) {
+            // 默認啟用 GUI
+            enableGUI = true;
             return;
         }
 
@@ -376,8 +378,11 @@ public class ClassDumpAgent {
             } else if ("all".equals(arg) || "full".equals(arg)) {
                 enableTaskMgr = true;
                 enableObfuscatedFileDetect = true;
-            } else if ("gui".equals(arg) || "swing".equals(arg)) {
                 enableGUI = true;
+            } else if ("gui".equals(arg) || "swing".equals(arg) || "g".equals(arg)) {
+                enableGUI = true;
+            } else if ("nogui".equals(arg) || "ng".equals(arg)) {
+                enableGUI = false;
             } else if ("verbose".equals(arg) || "debug".equals(arg) || "v".equals(arg)) {
                 verboseLogging = true;
             }

@@ -47,11 +47,11 @@ public class ClassViewerGUI extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1200, 800);
         setLocationRelativeTo(null);
-        
+
+        startAutoRefresh();
         initComponents();
         setupMenu();
-        startAutoRefresh();
-        
+
         logMessage("Class Viewer GUI Started");
         logMessage("Monitoring class loading in real-time...");
     }
